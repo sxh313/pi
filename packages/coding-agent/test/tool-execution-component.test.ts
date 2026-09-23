@@ -181,6 +181,43 @@ describe("ToolExecutionComponent parity", () => {
 		expect(rendered).toContain("README.md");
 	});
 
+	// Issue #9887: read args are rendered before validation, and models can emit offset/limit as
+	// strings. The rendered range must match the lines execute() reads, which sees them converted.
+	test.each([
+		{ offset: 25, limit: 13 },
+		{ offset: "25", limit: "13" },
+		{ offset: 25, limit: "13" },
+		{ offset: "25", limit: 13 },
+	])("renders read range :25-37 for args $offset/$limit", ({ offset, limit }) => {
+		const component = new ToolExecutionComponent(
+			"read",
+			"tool-read-range",
+			{ path: "notes.txt", offset, limit },
+			{},
+			createReadToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		const rendered = stripAnsi(component.render(120).join("\n"));
+		expect(rendered).toContain("notes.txt:25-37");
+		expect(rendered).not.toContain("2512");
+	});
+
+	test("omits the read line range when offset is not numeric", () => {
+		const component = new ToolExecutionComponent(
+			"read",
+			"tool-read-invalid-range",
+			{ path: "notes.txt", offset: "first" },
+			{},
+			createReadToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		const rendered = stripAnsi(component.render(120).join("\n"));
+		expect(rendered).toContain("notes.txt");
+		expect(rendered).not.toContain("notes.txt:");
+	});
+
 	test("bash execute emits an initial empty partial update before output arrives", async () => {
 		const updates: Array<{ content: Array<{ type: string; text?: string }>; details?: unknown }> = [];
 		const operations: BashOperations = {

@@ -28,6 +28,14 @@ export function str(value: unknown): string | null {
 	return null;
 }
 
+/** Parse a numeric tool argument: renderers see raw streamed args, which models can emit as strings. */
+export function num(value: unknown): number | undefined {
+	if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+	if (typeof value !== "string" || value.trim() === "") return undefined;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function replaceTabs(text: string): string {
 	return text.replace(/\t/g, "   ");
 }

@@ -1,4 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
+import type { JsonObject } from "@earendil-works/pi-ai";
 import { setKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
@@ -97,6 +98,66 @@ function modelChange(id: string, parentId: string | null): ModelChangeEntry {
 	};
 }
 
+// Issue #9887: the read label is built from raw tool arguments, which models can emit as strings.
+function readToolCallPair(
+	id: string,
+	parentId: string | null,
+	args: JsonObject,
+): [SessionMessageEntry, SessionMessageEntry] {
+	const assistant: SessionMessageEntry = {
+		type: "message",
+		id,
+		parentId,
+		timestamp: new Date().toISOString(),
+		message: {
+			role: "assistant",
+			content: [{ type: "toolCall", id: `tc-${id}`, name: "read", arguments: args }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "toolUse",
+			timestamp: Date.now(),
+		},
+	};
+	const toolResult: SessionMessageEntry = {
+		type: "message",
+		id: `${id}-result`,
+		parentId: id,
+		timestamp: new Date().toISOString(),
+		message: {
+			role: "toolResult",
+			toolCallId: `tc-${id}`,
+			toolName: "read",
+			content: [{ type: "text", text: "ok" }],
+			isError: false,
+			timestamp: Date.now(),
+		},
+	};
+	return [assistant, toolResult];
+}
+
+function renderAllEntries(entries: SessionEntry[]): string {
+	const selector = new TreeSelectorComponent(
+		buildTree(entries),
+		"user-1",
+		24,
+		() => {},
+		() => {},
+		undefined,
+		undefined,
+		"all",
+	);
+	return selector.getTreeList().render(200).map(stripVTControlCharacters).join("\n");
+}
+
 // Helper to build a tree from entries using parentId relationships
 function buildTree(entries: Array<SessionEntry>): SessionTreeNode[] {
 	if (entries.length === 0) return [];
@@ -191,6 +252,24 @@ describe("TreeSelectorComponent", () => {
 			);
 			const rendered = allSelector.getTreeList().render(200).map(stripVTControlCharacters).join("\n");
 			expect(rendered).toContain("[context omit: asst-1]");
+		});
+
+		// Issue #9887: a numeric-looking string offset must not be concatenated into the range.
+		test("renders the read line range from string offset and limit arguments", () => {
+			const rendered = renderAllEntries([
+				userMessage("user-1", null, "hello"),
+				...readToolCallPair("asst-1", "user-1", { path: "test.ts", offset: "25", limit: "13" }),
+			]);
+			expect(rendered).toContain("[read: test.ts:25-37]");
+			expect(rendered).not.toContain("2512");
+		});
+
+		test("omits the read line range when offset is not numeric", () => {
+			const rendered = renderAllEntries([
+				userMessage("user-1", null, "hello"),
+				...readToolCallPair("asst-1", "user-1", { path: "test.ts", offset: "first" }),
+			]);
+			expect(rendered).toContain("[read: test.ts]");
 		});
 
 		test("focuses nearest visible ancestor when currentLeafId is a thinking_level_change entry", () => {
