@@ -181,6 +181,16 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			currentIndex >= 0 ? currentIndex : Math.min(this.selectedIndex, Math.max(0, this.filteredModels.length - 1));
 	}
 
+	private restoreBrowsedSelection(browsed: ModelItem | undefined): void {
+		if (!browsed) return;
+		const index = this.filteredModels.findIndex(
+			(item) => item.provider === browsed.provider && item.id === browsed.id,
+		);
+		if (index < 0 || index === this.selectedIndex) return;
+		this.selectedIndex = index;
+		this.updateList();
+	}
+
 	private async refreshModels(): Promise<void> {
 		const timeoutMs = 15_000;
 		let timedOut = false;
@@ -205,8 +215,12 @@ export class ModelSelectorComponent extends Container implements Focusable {
 					this.refreshStatusSuccess = true;
 				}
 			}
+			// The list may have moved or been filtered while the request was in flight: pin that row
+			// across the reload instead of letting it snap back to the session's current model.
+			const browsed = this.filteredModels[this.selectedIndex];
 			this.loadModelsFromSnapshot();
 			this.filterModels(this.searchInput.getValue());
+			this.restoreBrowsedSelection(browsed);
 			this.tui.requestRender();
 		} catch (error) {
 			if (this.closed) return;

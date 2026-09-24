@@ -1,3 +1,4 @@
+import type { ModelsRefreshResult } from "@earendil-works/pi-ai";
 import { setKeybindings, type TUI } from "@earendil-works/pi-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
@@ -77,6 +78,53 @@ describe("model selector", () => {
 		expect(saveDefault).not.toHaveBeenCalled();
 		selector.handleInput("\x12");
 		expect(saveDefault).toHaveBeenCalledWith(currentModel);
+	});
+
+	// Issue #9109
+	it("keeps the browsed model selected when the background catalog refresh finishes", async () => {
+		harness = await createHarness({
+			models: [
+				{ id: "current-model", name: "Current Model", reasoning: true },
+				{ id: "browsed-model", name: "Browsed Model", reasoning: true },
+			],
+		});
+		let finishRefresh: (() => void) | undefined;
+		vi.spyOn(harness.session.modelRuntime, "refresh").mockImplementation(
+			() =>
+				new Promise<ModelsRefreshResult>((resolve) => {
+					finishRefresh = () => resolve({ aborted: false, errors: new Map() });
+				}),
+		);
+		const currentModel = harness.getModel("current-model")!;
+		const selector = new ModelSelectorComponent(
+			createFakeTui(),
+			currentModel,
+			harness.session.modelRuntime,
+			[],
+			() => {},
+			() => {},
+		);
+
+		const getModelRow = (id: string): string | undefined =>
+			stripAnsi(selector.render(120).join("\n"))
+				.split("\n")
+				.find((line) => line.includes(`${id} [`))
+				?.trimEnd();
+		const browsedRow = `→   browsed-model [${currentModel.provider}]`;
+
+		// The user moves the cursor while the refresh request is still in flight.
+		selector.handleInput("\x1b[B");
+		expect(getModelRow("browsed-model")).toBe(browsedRow);
+
+		finishRefresh!();
+		// Wait until the completion handler has actually rebuilt the list, then check
+		// that it did not move the cursor back to the session's current model.
+		await vi.waitFor(() => {
+			expect(stripAnsi(selector.render(120).join("\n"))).toContain("Model catalogs refreshed.");
+		});
+		expect(getModelRow("browsed-model")).toBe(browsedRow);
+		expect(getModelRow("current-model")).toBe(`  ✓ current-model [${currentModel.provider}]`);
+		selector.dispose();
 	});
 
 	it("lists every catalog that failed to refresh", async () => {
